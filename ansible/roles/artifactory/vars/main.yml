@@ -1,0 +1,13 @@
+jfrog_db_name: artifactory
+artifactory_version: "5.2.1"
+artifactory_license: oss
+artifactory_username: "artifactory"
+artifactory_password: "password"
+postgres_jdbc_url: "http://jdbc.postgresql.org/download/postgresql-9.3-1102.jdbc4.jar"
+artifactory_data_filestore_path: "/opt/artifactory/filestore"
+artifactory_data_derby_path: "/opt/artifactory/derby"
+artifactory_data_filestore_maxsize: 5GB
+artifactory_database: postgresql
+artifactory_url: "https://bintray.com/artifact/download/jfrog/artifactory/jfrog-artifactory-{{ artifactory_license }}-{{ artifactory_version }}.zip"
+artifactory_file: "artifactory-{{ artifactory_version }}.zip"
+artifactory_home: "/opt/artifactory/artifactory-{{ artifactory_license }}-{{ artifactory_version }}"

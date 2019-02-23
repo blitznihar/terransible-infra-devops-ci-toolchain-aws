@@ -1,0 +1,8 @@
+- name: Create Sonarqube server
+  hosts: all
+  gather_facts: true
+  become: yes
+  become_method: sudo
+  tags: [sonarqube]
+  roles:
+  - sonarqube

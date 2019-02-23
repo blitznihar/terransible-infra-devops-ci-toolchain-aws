@@ -1,0 +1,131 @@
+---
+- name: Download JDK
+  get_url:
+    url: "https://download.oracle.com/otn-pub/java/jdk/8u201-b09/42970487e3af4f5aa5bca3f542482c60/jdk-8u201-linux-x64.tar.gz"
+    headers: 'Cookie:oraclelicense=accept-securebackup-cookie'
+    dest: /opt/jdk-8u201-linux-x64.tar.gz
+
+- name: Unpack archive
+  command: "tar -zxf /opt/jdk-8u201-linux-x64.tar.gz -C /opt"
+
+- name: Make Java available for system
+  command: 'alternatives --install "/usr/bin/java" "java" "/opt/jdk1.8.0_201/bin/java" 2000'
+
+- name: Make Javac available for system
+  command: 'alternatives --install "/usr/bin/javac" "javac" "/opt/jdk1.8.0_201/bin/javac" 2000'
+
+- name: Make Jar available for system
+  command: 'alternatives --install "/usr/bin/jar" "jar" "/opt/jdk1.8.0_201/bin/jar" 2000'
+
+- name: Clean up
+  file: state=absent path=/opt/jdk-8u201-linux-x64.tar.gz
+
+- name: 'check presence of java'
+  command: '/usr/bin/java -version'
+  register: java
+  changed_when: no
+  tags:
+    - artifactory
+    - verify
+
+- name: 'yum install prerequisites'
+  yum:
+    name:
+      - openssl
+      - unzip
+    state: present
+  retries: 3
+  register: result
+  until: result is succeeded
+  tags:
+    - artifactory
+
+- name: 'yum install net-tools'
+  yum:
+    name: net-tools
+    state: present
+  retries: 3
+  register: result
+  until: result is succeeded
+
+- name: 'set permissions on /opt'
+  file:
+    path: /opt
+    state: directory
+    mode: 0755
+
+- name: 'create user to run artifactory'
+  user:
+    name: "{{ artifactory_username }}"
+    home: /opt/artifactory/
+    shell: /bin/bash
+    system: true
+  tags:
+    - users
+
+- name: 'verify presence of artifactory'
+  stat:
+    path: "{{ artifactory_home }}/webapps/artifactory.war"
+  register: artifactory_jarfile
+
+- name: ansible create /opt/artifactory directory
+  file:
+    path: /opt/artifactory
+    state: directory
+
+- name: 'download artifactory'
+  unarchive:
+    remote_src: yes
+    src: "{{ artifactory_url }}"
+    dest: /opt/artifactory
+
+- name: 'create config dir for artifactory'
+  file:
+    dest: /etc/opt/jfrog/artifactory
+    state: directory
+    owner: "{{ artifactory_username }}"
+    mode: 0755
+  tags:
+    - config
+
+- name: 'create configuration file'
+  template:
+    src: etc-opt-jfrog-artifactory-default
+    dest: /etc/opt/jfrog/artifactory/default
+    owner: "{{ artifactory_username }}"
+    group: "{{ artifactory_username }}"
+    mode: 0644
+  notify: 'restart artifactory'
+  tags:
+    - config
+
+- name: 'symlink current version'
+  file:
+    state: link
+    dest: /opt/artifactory/artifactory
+    src: "{{ artifactory_home }}"
+    owner: "{{ artifactory_username }}"
+  notify: 'restart artifactory'
+  tags:
+    - config
+
+- name: 'install artifactory as a service'
+  command: "{{ artifactory_home }}/bin/installService.sh {{ artifactory_username }}"
+  args:
+    creates: /etc/init.d/artifactory
+  notify: 'restart artifactory'
+  tags:
+    - init
+
+- name: 'enable artifactory service'
+  service:
+    name: artifactory
+    enabled: true
+  tags:
+    - init
+
+- name: Allow port 8081
+  shell: iptables -I INPUT -p tcp --dport 8081 -m state --state NEW,ESTABLISHED -j ACCEPT
+
+  #https://nallarameshreddy.wordpress.com/2017/05/30/steps-to-download-and-install-artifactory-in-linux/
+  #https://www.jfrog.com/confluence/display/RTF/Installing+on+Linux+Solaris+or+Mac+OS

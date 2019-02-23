@@ -1,0 +1,7 @@
+#database config
+sonar_db_name: sonarqube
+sonar_db_user: sonarqube
+sonar_db_password: sonarqube
+sonar_version: 7.6
+sonar_home: /opt/sonarqube
+sonar_download_url: https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-7.6.zip

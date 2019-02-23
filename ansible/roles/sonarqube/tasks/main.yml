@@ -1,0 +1,202 @@
+- name: Ensure group "devops" exists
+  group:
+    name: devops
+    state: present
+
+- name: Ensure group "sonarqube" exists
+  group:
+    name: sonarqube
+    state: present
+
+#https://docs.sonarqube.org/latest/requirements/requirements/
+- name: Setting limits /etc/security/limits.conf
+  blockinfile:
+    dest: /etc/security/limits.conf
+    content: |
+      sonarqube   -   nofile   128536
+      sonarqube   -   nproc    8096
+    state: present
+    create: no
+- sysctl:
+    name: vm.max_map_count
+    value: 1024695552
+    state: present
+- sysctl:
+    name: fs.file-max
+    value: 128536
+    state: present
+
+- name: the user running SonarQube can open at least 128536 file descriptors
+  shell: ulimit -n 128536
+- name: the user running SonarQube can open at least 8096 threads
+  shell: ulimit -u 8096
+
+- name: Add the user 'sonarqube' with a bash shell, appending to sonarqube and devops group
+  user:
+    name: sonarqube
+    shell: /bin/bash
+    groups: devops, sonarqube
+    append: yes
+    password: sonarqube
+
+- name: Download JDK
+  get_url:
+    url: "https://download.oracle.com/otn-pub/java/jdk/8u201-b09/42970487e3af4f5aa5bca3f542482c60/jdk-8u201-linux-x64.tar.gz"
+    headers: 'Cookie:oraclelicense=accept-securebackup-cookie'
+    dest: /opt/jdk-8u201-linux-x64.tar.gz
+
+- name: Unpack archive
+  command: "tar -zxf /opt/jdk-8u201-linux-x64.tar.gz -C /opt"
+
+- name: Make Java available for system
+  command: 'alternatives --install "/usr/bin/java" "java" "/opt/jdk1.8.0_201/bin/java" 2000'
+
+- name: Make Javac available for system
+  command: 'alternatives --install "/usr/bin/javac" "javac" "/opt/jdk1.8.0_201/bin/javac" 2000'
+
+- name: Make Jar available for system
+  command: 'alternatives --install "/usr/bin/jar" "jar" "/opt/jdk1.8.0_201/bin/jar" 2000'
+
+- name: Clean up
+  file: state=absent path=/opt/jdk-8u201-linux-x64.tar.gz
+
+- name: 'check presence of java'
+  command: '/usr/bin/java -version'
+  register: java
+  changed_when: no
+  tags:
+    - artifactory
+    - verify
+
+- name: 'yum install epel-release'
+  yum:
+    name:
+      - epel-release
+    state: latest
+
+- name: update yum caсhe
+  yum:
+    update_cache: true
+
+- name: 'yum install prerequisites'
+  yum:
+    name:
+      - openssl
+      - unzip
+    state: present
+  retries: 3
+  register: result
+  until: result is succeeded
+  tags:
+    - sonarqube
+  
+- name: 'yum install nginx'
+  yum:
+    name:
+      - nginx
+    state: present
+
+- name: 'download sonarqube'
+  file:
+    path: "{{ sonar_home }}"
+    state: directory 
+
+- name: 'unzip sonarqube'
+  unarchive:
+    remote_src: yes
+    src: "{{ sonar_download_url }}"
+    dest: "{{ sonar_home }}"
+
+- name: Ensure group "sonar" exists
+  group:
+    name: sonar
+    state: present
+
+- name: Add the user 'sonar'
+  user:
+    name: sonar
+    shell: /bin/bash
+    groups: sonar
+    append: yes
+    password: sonar
+- name: CHOWN sonar:sonar
+  command: "chown -R sonar:sonar /opt/sonarqube/sonarqube-7.6/"
+  changed_when: false
+
+
+- name: RUN_AS_USER=sonar
+  blockinfile:
+    path: /opt/sonarqube/sonarqube-7.6/bin/linux-x86-64/sonar.sh
+    marker: "<!-- {mark} ANSIBLE MANAGED BLOCK -->"
+    insertafter: "#RUN_AS_USER=sonar"
+    content: |
+      RUN_AS_USER=sonar
+
+- name: Allow port 9000
+  shell: iptables -I INPUT -p tcp --dport 9000 -m state --state NEW,ESTABLISHED -j ACCEPT
+
+- name: Allow port 8080
+  shell: iptables -I INPUT -p tcp --dport 8080 -m state --state NEW,ESTABLISHED -j ACCEPT
+
+- name: Clean artifact path
+  file:
+    state: absent
+    path: /etc/systemd/system/sonarqube.service
+
+- name: Create sonarqube.service
+  blockinfile:
+    dest: /etc/systemd/system/sonarqube.service
+    content: |
+      [Unit]
+      Description=SonarQube service
+      After=syslog.target network.target
+
+      [Service]
+      [Service]
+      Type=forking
+
+      ExecStart=/opt/sonarqube/sonarqube-7.6/bin/linux-x86-64/sonar.sh start
+      ExecStop=/opt/sonarqube/sonarqube-7.6/bin/linux-x86-64/sonar.sh stop
+
+      User=sonar
+      Group=sonar
+      Restart=always
+      
+      StandardOutput=syslog
+      LimitNOFILE=65536
+      LimitNPROC=8192
+      TimeoutStartSec=30
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+    state: present
+    create: yes
+
+
+- name: Ensure the SonarQube service is running
+  service: name=sonarqube state=started enabled=yes
+
+- name: NGINX Confix
+  blockinfile:
+    path: /etc/nginx/nginx.conf
+    marker: "### {mark} ANSIBLE MANAGED BLOCK ###"
+    insertafter: "    # for more information."
+    content: |
+        server {
+            listen       8080;
+            listen       [::]:8080;
+            server_name  _;
+            root         /usr/share/nginx/html;
+
+            location / {
+                proxy_pass http://localhost:9000;
+              }
+            }
+  tags:
+    - nginx
+
+- name: Ensure the Nginx service is running
+  service: name=nginx state=started enabled=yes
+  tags:
+    - nginx

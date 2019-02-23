@@ -1,0 +1,8 @@
+- name: Create Artifactory server
+  hosts: all
+  gather_facts: true
+  become: yes
+  become_method: sudo
+  tags: [artifactory]
+  roles:
+  - artifactory

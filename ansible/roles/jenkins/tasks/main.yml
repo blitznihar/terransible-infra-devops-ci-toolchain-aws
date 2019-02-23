@@ -1,0 +1,85 @@
+
+- name: Install dependencies
+  package:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - java-1.8.0-openjdk
+    - git
+    - texlive-latex
+
+- name: Download jenkins repo
+  get_url:
+    url: "http://pkg.jenkins-ci.org/redhat/jenkins.repo"
+    dest: /etc/yum.repos.d/jenkins.repo
+
+- name: Import jenkins CI key
+  rpm_key:
+    key: http://pkg.jenkins-ci.org/redhat/jenkins-ci.org.key
+    state: present
+
+- name: Update the software package repository
+  yum:
+    name: '*'
+    update_cache: yes
+
+- name: Install jenkins
+  yum:
+    name: jenkins
+    state: present
+    update_cache: yes
+
+- name: Allow port 8080
+  shell: iptables -I INPUT -p tcp --dport 8080 -m state --state NEW,ESTABLISHED -j ACCEPT
+
+- name: Ensure the Jenkins service is running
+  service: name=jenkins state=started enabled=yes
+  tags:
+    - final
+
+
+- name: Ensure group "devops" exists
+  group:
+    name: devops
+    state: present
+  tags:
+    - final
+
+- name: Add the user 'jenkins' with a bash shell, appending to group 'wheel'
+  user:
+    name: jenkins
+    shell: /bin/bash
+    groups: devops
+    append: yes
+    password: Jenkins@1234
+  tags:
+    - final
+
+- name: Create a 2048-bit SSH key for user jenkins in ~/.ssh/id_rsa
+  user:
+    name: jenkins
+    generate_ssh_key: yes
+    ssh_key_bits: 2048
+    ssh_key_file: ~/.ssh/id_rsa
+  tags:
+    - final
+
+- lineinfile:
+    path: /etc/sudoers
+    state: present
+    regexp: '^# %wheel'
+    line: 'jenkins ALL=(ALL) NOPASSWD: ALL'
+    validate: 'visudo -cf %s'
+  tags:
+    - final
+
+- name: Print key
+  shell: cat /var/lib/jenkins/secrets/initialAdminPassword
+  register: adminpass
+  tags:
+    - final
+
+- debug:
+    var: adminpass
+  tags:
+    - final
