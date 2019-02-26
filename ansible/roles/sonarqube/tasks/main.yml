@@ -100,6 +100,17 @@
     src: "{{ sonar_download_url }}"
     dest: "{{ sonar_home }}"
 
+- name: Update the software package repository
+  yum:
+    name: '*'
+    update_cache: yes
+
+- name: Install NGINX
+  yum:
+    name: epel-release
+    state: present
+    update_cache: yes
+
 - name: Install NGINX
   yum:
     name: nginx
@@ -136,12 +147,6 @@
     insertafter: "#RUN_AS_USER=sonar"
     content: |
       RUN_AS_USER=sonar
-
-# - name: Allow port 9000
-#   shell: iptables -I INPUT -p tcp --dport 9000 -m state --state NEW,ESTABLISHED -j ACCEPT
-
-# - name: Allow port 8080
-#   shell: iptables -I INPUT -p tcp --dport 8080 -m state --state NEW,ESTABLISHED -j ACCEPT
 
 - name: Allow port 8080
   iptables:
