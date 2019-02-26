@@ -1,59 +1,163 @@
+- name: Check if JDK 1.8 exists exists
+  stat:
+    path: /opt/jdk1.8.0_201/bin/java
+  register: java_present
 
-- name: Install dependencies
-  package:
-    name: "{{ item }}"
-    state: present
-  loop:
-    - java-1.8.0-openjdk
-    - git
-    - texlive-latex
-
-- name: Download jenkins repo
+- name: Download JDK
   get_url:
-    url: "http://pkg.jenkins-ci.org/redhat/jenkins.repo"
-    dest: /etc/yum.repos.d/jenkins.repo
+    url: "https://download.oracle.com/otn-pub/java/jdk/8u201-b09/42970487e3af4f5aa5bca3f542482c60/jdk-8u201-linux-x64.tar.gz"
+    headers: 'Cookie:oraclelicense=accept-securebackup-cookie'
+    dest: /opt/jdk-8u201-linux-x64.tar.gz
+  when: not java_present.stat.exists
 
-- name: Import jenkins CI key
-  rpm_key:
-    key: http://pkg.jenkins-ci.org/redhat/jenkins-ci.org.key
-    state: present
+- name: Unpack archive JDK
+  unarchive:
+    src: /opt/jdk-8u201-linux-x64.tar.gz
+    dest: /opt
+    remote_src: yes
+  when: not java_present.stat.exists
+
+- name: correct java version selected
+  alternatives:
+    name: java
+    link: /usr/bin/java
+    path: /opt/jdk1.8.0_201/bin/java
+  when: not java_present.stat.exists
+
+- name: correct javac version selected
+  alternatives:
+    name: javac
+    link: /usr/bin/javac
+    path: /opt/jdk1.8.0_201/bin/javac
+  when: not java_present.stat.exists
+- name: correct jar version selected
+  alternatives:
+    name: jar
+    link: /usr/bin/jar
+    path: /opt/jdk1.8.0_201/bin/jar
+  when: not java_present.stat.exists
+
+- name: Clean up
+  file:
+    state: absent
+    path: /opt/jdk-8u201-linux-x64.tar.gz
+  when: not java_present.stat.exists
 
 - name: Update the software package repository
   yum:
     name: '*'
     update_cache: yes
 
+- name: Checking if Maven is already installed
+  stat:
+    path: '/opt/apache-maven-3.6.0-bin/bin/mvn'
+  register: maven_present
+
+- name: Downloading Maven Binaries
+  get_url:
+    url: 'http://apache.cs.utah.edu/maven/maven-3/3.6.0/binaries/apache-maven-3.6.0-bin.tar.gz'
+    dest: '/opt/apache-maven-3.6.0-bin.tar.gz'
+  when: not maven_present.stat.exists
+
+- name: Unarchive Maven Binaries
+  unarchive:
+    src: '/opt/apache-maven-3.6.0-bin.tar.gz'
+    dest: '/opt'
+    remote_src: yes
+  when: not maven_present.stat.exists
+
+- name: Cleaning Up
+  file:
+    state: absent
+    path: '/opt/apache-maven-3.6.0-bin.tar.gz'
+  when: not maven_present.stat.exists
+
+- name: Add Java home and Maven home
+  blockinfile:
+    dest: /etc/profile.d/java_dev.sh
+    create: yes
+    block: |
+      export JAVA_HOME=/opt/jdk1.8.0_201/
+      export M2_HOME=/opt/apache-maven-3.6.0-bin
+      export PATH=${JAVA_HOME}/bin:${M2_HOME}/bin:${PATH}
+
+
+- name: Checking if Jenkins is already installed
+  stat:
+    path: '/var/lib/jenkins/config.xml'
+  register: jenkins_present
+
+- name: Download jenkins repo
+  get_url:
+    url: "http://pkg.jenkins-ci.org/redhat/jenkins.repo"
+    dest: /etc/yum.repos.d/jenkins.repo
+  when: not jenkins_present.stat.exists
+
+- name: Import jenkins CI key
+  rpm_key:
+    key: http://pkg.jenkins-ci.org/redhat/jenkins-ci.org.key
+    state: present
+  when: not jenkins_present.stat.exists
+
 - name: Install jenkins
   yum:
     name: jenkins
     state: present
     update_cache: yes
+  when: not jenkins_present.stat.exists
+
+- name: Install docker dependencies
+  package:
+    name: "{{ item }}"
+    state: present
+    update_cache: yes
+  loop:
+    - git
+    - texlive-latex
+    - lvm2
+    - device-mapper
+    - device-mapper-persistent-data
+    - device-mapper-event
+    - device-mapper-libs
+    - device-mapper-event-libs
+    - http://vault.centos.org/centos/7.3.1611/extras/x86_64/Packages/container-selinux-2.9-4.el7.noarch.rpm
+    - https://download.docker.com/linux/centos/7/x86_64/stable/Packages/docker-ce-cli-18.09.2-3.el7.x86_64.rpm
+    - https://download.docker.com/linux/centos/7/x86_64/stable/Packages/containerd.io-1.2.2-3.el7.x86_64.rpm
+    - https://download.docker.com/linux/centos/7/x86_64/stable/Packages/docker-ce-18.09.2-3.el7.x86_64.rpm
+  
 
 - name: Allow port 8080
-  shell: iptables -I INPUT -p tcp --dport 8080 -m state --state NEW,ESTABLISHED -j ACCEPT
+  iptables:
+     chain: INPUT
+     protocol: tcp
+     destination_port: "8080"
+     ctstate: NEW,ESTABLISHED
+     jump: ACCEPT
 
 - name: Ensure the Jenkins service is running
-  service: name=jenkins state=started enabled=yes
-  tags:
-    - final
+  service:
+    name: jenkins
+    state: started
+    enabled: yes
+
+- name: Ensure the docker service is running
+  service:
+    name: docker
+    state: started
+    enabled: yes
 
 
 - name: Ensure group "devops" exists
   group:
     name: devops
     state: present
-  tags:
-    - final
 
 - name: Add the user 'jenkins' with a bash shell, appending to group 'wheel'
   user:
     name: jenkins
-    shell: /bin/bash
     groups: devops
     append: yes
     password: Jenkins@1234
-  tags:
-    - final
 
 - name: Create a 2048-bit SSH key for user jenkins in ~/.ssh/id_rsa
   user:
@@ -61,25 +165,24 @@
     generate_ssh_key: yes
     ssh_key_bits: 2048
     ssh_key_file: ~/.ssh/id_rsa
-  tags:
-    - final
 
-- lineinfile:
-    path: /etc/sudoers
-    state: present
-    regexp: '^# %wheel'
-    line: 'jenkins ALL=(ALL) NOPASSWD: ALL'
-    validate: 'visudo -cf %s'
-  tags:
-    - final
+- name: Adding Jenkins as admin
+  lineinfile:
+      path: /etc/sudoers
+      state: present
+      regexp: '^# %wheel'
+      line: 'jenkins ALL=(ALL) NOPASSWD: ALL'
+      validate: 'visudo -cf %s'
 
-- name: Print key
+
+- name: Capture key
   shell: cat /var/lib/jenkins/secrets/initialAdminPassword
   register: adminpass
   tags:
     - final
 
-- debug:
+- name: Print key
+  debug:
     var: adminpass
   tags:
     - final

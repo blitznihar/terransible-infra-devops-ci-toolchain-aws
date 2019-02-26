@@ -13,23 +13,26 @@
   blockinfile:
     dest: /etc/security/limits.conf
     content: |
-      sonarqube   -   nofile   128536
-      sonarqube   -   nproc    8096
+      sonarqube   -   nofile   65536
+      sonarqube   -   nproc    2048
     state: present
     create: no
-- sysctl:
+- name: Set vm.max_map_count to 262144
+  sysctl:
     name: vm.max_map_count
-    value: 1024695552
-    state: present
-- sysctl:
-    name: fs.file-max
-    value: 128536
+    value: "262144"
     state: present
 
-- name: the user running SonarQube can open at least 128536 file descriptors
-  shell: ulimit -n 128536
-- name: the user running SonarQube can open at least 8096 threads
-  shell: ulimit -u 8096
+- name: Set fs.file-max to 65536
+  sysctl:
+    name: fs.file-max
+    value: "65536"
+    state: present
+
+- name: the user running SonarQube can open at least 65536 file descriptors
+  shell: ulimit -n 65536
+- name: the user running SonarQube can open at least 2048 threads
+  shell: ulimit -u 2048
 
 - name: Add the user 'sonarqube' with a bash shell, appending to sonarqube and devops group
   user:
@@ -45,38 +48,34 @@
     headers: 'Cookie:oraclelicense=accept-securebackup-cookie'
     dest: /opt/jdk-8u201-linux-x64.tar.gz
 
-- name: Unpack archive
-  command: "tar -zxf /opt/jdk-8u201-linux-x64.tar.gz -C /opt"
+- name: Unpack archive JDK
+  unarchive:
+    src: /opt/jdk-8u201-linux-x64.tar.gz
+    dest: /opt
+    remote_src: yes
 
-- name: Make Java available for system
-  command: 'alternatives --install "/usr/bin/java" "java" "/opt/jdk1.8.0_201/bin/java" 2000'
+- name: correct java version selected
+  alternatives:
+    name: java
+    link: /usr/bin/java
+    path: /opt/jdk1.8.0_201/bin/java
 
-- name: Make Javac available for system
-  command: 'alternatives --install "/usr/bin/javac" "javac" "/opt/jdk1.8.0_201/bin/javac" 2000'
+- name: correct javac version selected
+  alternatives:
+    name: javac
+    link: /usr/bin/javac
+    path: /opt/jdk1.8.0_201/bin/javac
 
-- name: Make Jar available for system
-  command: 'alternatives --install "/usr/bin/jar" "jar" "/opt/jdk1.8.0_201/bin/jar" 2000'
+- name: correct jar version selected
+  alternatives:
+    name: jar
+    link: /usr/bin/jar
+    path: /opt/jdk1.8.0_201/bin/jar
 
 - name: Clean up
-  file: state=absent path=/opt/jdk-8u201-linux-x64.tar.gz
-
-- name: 'check presence of java'
-  command: '/usr/bin/java -version'
-  register: java
-  changed_when: no
-  tags:
-    - artifactory
-    - verify
-
-- name: 'yum install epel-release'
-  yum:
-    name:
-      - epel-release
-    state: latest
-
-- name: update yum caсhe
-  yum:
-    update_cache: true
+  file:
+    state: absent
+    path: /opt/jdk-8u201-linux-x64.tar.gz
 
 - name: 'yum install prerequisites'
   yum:
@@ -89,23 +88,24 @@
   until: result is succeeded
   tags:
     - sonarqube
-  
-- name: 'yum install nginx'
-  yum:
-    name:
-      - nginx
-    state: present
 
 - name: 'download sonarqube'
   file:
     path: "{{ sonar_home }}"
-    state: directory 
+    state: directory
 
 - name: 'unzip sonarqube'
   unarchive:
     remote_src: yes
     src: "{{ sonar_download_url }}"
     dest: "{{ sonar_home }}"
+
+- name: Install NGINX
+  yum:
+    name: nginx
+    state: present
+    update_cache: yes
+
 
 - name: Ensure group "sonar" exists
   group:
@@ -119,24 +119,45 @@
     groups: sonar
     append: yes
     password: sonar
-- name: CHOWN sonar:sonar
-  command: "chown -R sonar:sonar /opt/sonarqube/sonarqube-7.6/"
-  changed_when: false
 
+- name: CHOWN sonar:sonar
+  file:
+    path: /opt/sonarqube/sonarqube-7.6/
+    owner: sonar
+    group: sonar
+    recurse: yes
+  changed_when: false
+#   command: "chown -R sonar:sonar /opt/sonarqube/sonarqube-7.6/"
 
 - name: RUN_AS_USER=sonar
   blockinfile:
-    path: /opt/sonarqube/sonarqube-7.6/bin/linux-x86-64/sonar.sh
+    dest: /opt/sonarqube/sonarqube-7.6/bin/linux-x86-64/sonar.sh
     marker: "<!-- {mark} ANSIBLE MANAGED BLOCK -->"
     insertafter: "#RUN_AS_USER=sonar"
     content: |
       RUN_AS_USER=sonar
 
-- name: Allow port 9000
-  shell: iptables -I INPUT -p tcp --dport 9000 -m state --state NEW,ESTABLISHED -j ACCEPT
+# - name: Allow port 9000
+#   shell: iptables -I INPUT -p tcp --dport 9000 -m state --state NEW,ESTABLISHED -j ACCEPT
+
+# - name: Allow port 8080
+#   shell: iptables -I INPUT -p tcp --dport 8080 -m state --state NEW,ESTABLISHED -j ACCEPT
 
 - name: Allow port 8080
-  shell: iptables -I INPUT -p tcp --dport 8080 -m state --state NEW,ESTABLISHED -j ACCEPT
+  iptables:
+     chain: INPUT
+     protocol: tcp
+     destination_port: "8080"
+     ctstate: NEW,ESTABLISHED
+     jump: ACCEPT
+
+- name: Allow port 9000
+  iptables:
+     chain: INPUT
+     protocol: tcp
+     destination_port: "9000"
+     ctstate: NEW,ESTABLISHED
+     jump: ACCEPT
 
 - name: Clean artifact path
   file:
@@ -175,11 +196,14 @@
 
 
 - name: Ensure the SonarQube service is running
-  service: name=sonarqube state=started enabled=yes
+  service:
+    name: sonarqube
+    state: started
+    enabled: yes
 
 - name: NGINX Confix
   blockinfile:
-    path: /etc/nginx/nginx.conf
+    dest: /etc/nginx/nginx.conf
     marker: "### {mark} ANSIBLE MANAGED BLOCK ###"
     insertafter: "    # for more information."
     content: |
@@ -197,6 +221,9 @@
     - nginx
 
 - name: Ensure the Nginx service is running
-  service: name=nginx state=started enabled=yes
+  service:
+    name: nginx
+    state: started
+    enabled: yes
   tags:
     - nginx
