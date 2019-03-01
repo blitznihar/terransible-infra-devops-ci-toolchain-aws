@@ -50,7 +50,7 @@
 
 - name: Checking if Maven is already installed
   stat:
-    path: '/opt/apache-maven-3.6.0-bin/bin/mvn'
+    path: '/opt/apache-maven-3.6.0/bin/mvn'
   register: maven_present
 
 - name: Downloading Maven Binaries
@@ -78,7 +78,7 @@
     create: yes
     block: |
       export JAVA_HOME=/opt/jdk1.8.0_201/
-      export M2_HOME=/opt/apache-maven-3.6.0-bin
+      export M2_HOME=/opt/apache-maven-3.6.0
       export PATH=${JAVA_HOME}/bin:${M2_HOME}/bin:${PATH}
 
 
@@ -86,18 +86,24 @@
   stat:
     path: '/var/lib/jenkins/config.xml'
   register: jenkins_present
+  tags: 
+    - master
 
 - name: Download jenkins repo
   get_url:
-    url: "http://pkg.jenkins-ci.org/redhat/jenkins.repo"
+    url: "http://pkg.jenkins-ci.org/redhat-stable/jenkins.repo"
     dest: /etc/yum.repos.d/jenkins.repo
   when: not jenkins_present.stat.exists
+  tags: 
+    - master
 
 - name: Import jenkins CI key
   rpm_key:
     key: http://pkg.jenkins-ci.org/redhat/jenkins-ci.org.key
     state: present
   when: not jenkins_present.stat.exists
+  tags: 
+    - master
 
 - name: Install jenkins
   yum:
@@ -105,6 +111,8 @@
     state: present
     update_cache: yes
   when: not jenkins_present.stat.exists
+  tags: 
+    - master
 
 - name: Install docker dependencies
   package:
@@ -139,6 +147,8 @@
     name: jenkins
     state: started
     enabled: yes
+  tags: 
+    - master
 
 - name: Ensure the docker service is running
   service:
@@ -152,7 +162,7 @@
     name: devops
     state: present
 
-- name: Add the user 'jenkins' with a bash shell, appending to group 'wheel'
+- name: Add the user 'jenkins' with a bash shell, appending to devops group
   user:
     name: jenkins
     groups: devops
@@ -165,6 +175,8 @@
     generate_ssh_key: yes
     ssh_key_bits: 2048
     ssh_key_file: ~/.ssh/id_rsa
+  tags: 
+    - master
 
 - name: Adding Jenkins as admin
   lineinfile:
@@ -179,10 +191,10 @@
   shell: cat /var/lib/jenkins/secrets/initialAdminPassword
   register: adminpass
   tags:
-    - final
+    - master
 
 - name: Print key
   debug:
     var: adminpass
   tags:
-    - final
+    - master

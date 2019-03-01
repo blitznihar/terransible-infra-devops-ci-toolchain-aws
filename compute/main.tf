@@ -25,7 +25,7 @@ resource "aws_key_pair" "aws_key_pair_devops" {
 
 resource "aws_instance" "aws_instance_jenkins" {
   ami                    = "${data.aws_ami.centos.id}"
-  instance_type          = "t2.micro"
+  instance_type          = "t2.medium"
   count                  = 1
   subnet_id              = "${var.aws_subnet_subnet_01_devops_id}"
   vpc_security_group_ids = ["${var.aws_security_group_aws_security_group_devops_id}"]
@@ -46,6 +46,32 @@ resource "aws_instance" "aws_instance_jenkins" {
 
   provisioner "local-exec" {
     command = "sleep 120; ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -u centos --private-key ~/.ssh/id_rsa -i '${aws_instance.aws_instance_jenkins.public_ip},' ./ansible/jenkins_main.yml"
+  }
+}
+
+resource "aws_instance" "aws_instance_jenkins_nodes" {
+  ami                    = "${data.aws_ami.centos.id}"
+  instance_type          = "t2.medium"
+  count                  = 1
+  subnet_id              = "${var.aws_subnet_subnet_01_devops_id}"
+  vpc_security_group_ids = ["${var.aws_security_group_aws_security_group_devops_id}"]
+
+  root_block_device = {
+    volume_size           = "10"
+    volume_type           = "gp2"
+    delete_on_termination = true
+  }
+
+  tags = {
+    Name   = "jenkins-slave"
+    Server = "jenkins-slave${count.index +1}"
+    Group  = "DevOps"
+  }
+
+  key_name = "${aws_key_pair.aws_key_pair_devops.id}"
+
+  provisioner "local-exec" {
+    command = "sleep 120; ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -u centos --private-key ~/.ssh/id_rsa -i '${aws_instance.aws_instance_jenkins.public_ip},' ./ansible/jenkins_main.yml --skip-tags \"master\"" 
   }
 }
 
