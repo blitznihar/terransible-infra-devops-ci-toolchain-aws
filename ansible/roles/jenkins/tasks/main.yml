@@ -15,7 +15,7 @@
 - name: Add the user 'jenkins'
   user:
     name: jenkins
-    groups: devops
+    groups: devops, docker
     append: yes
     password: "{{ 'devops@1234' | password_hash('sha512') }}"
     state: present
