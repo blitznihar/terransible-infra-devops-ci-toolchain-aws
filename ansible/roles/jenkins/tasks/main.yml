@@ -1,3 +1,59 @@
+- name: Allow port 8080
+  iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "8080"
+    ctstate: NEW,ESTABLISHED
+    jump: ACCEPT
+
+- name: Create group "devops" exists
+  group:
+    name: devops
+    state: present
+    system: yes
+
+- name: Add the user 'jenkins'
+  user:
+    name: jenkins
+    groups: devops
+    append: yes
+    password: "{{ 'devops@1234' | password_hash('sha512') }}"
+    state: present
+    create_home: yes
+
+- name: Create a 2048-bit SSH key for user jenkins in /home/jenkins/.ssh/id_rsa
+  user:
+    name: jenkins
+    generate_ssh_key: yes
+    ssh_key_bits: 2048
+    ssh_key_file: .ssh/id_rsa
+
+- name: Adding jenkins as admin
+  blockinfile:
+    dest: /etc/sudoers
+    state: present
+    marker: "# {mark} ANSIBLE MANAGED BLOCK"
+    regexp: "^# %wheel"
+    block: |
+      jenkins       ALL=(ALL)       NOPASSWD: ALL
+      %devops       ALL=(ALL)       NOPASSWD: ALL
+
+- name: PasswordAuthentication yes in /etc/ssh/sshd_config
+  lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "PasswordAuthentication no"
+    line: PasswordAuthentication yes
+
+- name: Restart sshd service
+  service:
+    name: sshd
+    state: restarted
+
+- name: Update the software package repository
+  yum:
+    name: "*"
+    update_cache: yes
+
 - name: Check if JDK 1.8 exists exists
   stat:
     path: /opt/jdk1.8.0_201/bin/java
@@ -6,7 +62,7 @@
 - name: Download JDK
   get_url:
     url: "https://download.oracle.com/otn-pub/java/jdk/8u201-b09/42970487e3af4f5aa5bca3f542482c60/jdk-8u201-linux-x64.tar.gz"
-    headers: 'Cookie:oraclelicense=accept-securebackup-cookie'
+    headers: "Cookie:oraclelicense=accept-securebackup-cookie"
     dest: /opt/jdk-8u201-linux-x64.tar.gz
   when: not java_present.stat.exists
 
@@ -17,20 +73,21 @@
     remote_src: yes
   when: not java_present.stat.exists
 
-- name: correct java version selected
+- name: Ensure correct java version selected
   alternatives:
     name: java
     link: /usr/bin/java
     path: /opt/jdk1.8.0_201/bin/java
   when: not java_present.stat.exists
 
-- name: correct javac version selected
+- name: Ensure correct javac version selected
   alternatives:
     name: javac
     link: /usr/bin/javac
     path: /opt/jdk1.8.0_201/bin/javac
   when: not java_present.stat.exists
-- name: correct jar version selected
+
+- name: Ensure correct jar version selected
   alternatives:
     name: jar
     link: /usr/bin/jar
@@ -43,33 +100,28 @@
     path: /opt/jdk-8u201-linux-x64.tar.gz
   when: not java_present.stat.exists
 
-- name: Update the software package repository
-  yum:
-    name: '*'
-    update_cache: yes
-
 - name: Checking if Maven is already installed
   stat:
-    path: '/opt/apache-maven-3.6.0/bin/mvn'
+    path: "/opt/apache-maven-3.6.0/bin/mvn"
   register: maven_present
 
 - name: Downloading Maven Binaries
   get_url:
-    url: 'http://apache.cs.utah.edu/maven/maven-3/3.6.0/binaries/apache-maven-3.6.0-bin.tar.gz'
-    dest: '/opt/apache-maven-3.6.0-bin.tar.gz'
+    url: "http://apache.cs.utah.edu/maven/maven-3/3.6.0/binaries/apache-maven-3.6.0-bin.tar.gz"
+    dest: "/opt/apache-maven-3.6.0-bin.tar.gz"
   when: not maven_present.stat.exists
 
 - name: Unarchive Maven Binaries
   unarchive:
-    src: '/opt/apache-maven-3.6.0-bin.tar.gz'
-    dest: '/opt'
+    src: "/opt/apache-maven-3.6.0-bin.tar.gz"
+    dest: "/opt"
     remote_src: yes
   when: not maven_present.stat.exists
 
 - name: Cleaning Up
   file:
     state: absent
-    path: '/opt/apache-maven-3.6.0-bin.tar.gz'
+    path: "/opt/apache-maven-3.6.0-bin.tar.gz"
   when: not maven_present.stat.exists
 
 - name: Add Java home and Maven home
@@ -80,39 +132,6 @@
       export JAVA_HOME=/opt/jdk1.8.0_201/
       export M2_HOME=/opt/apache-maven-3.6.0
       export PATH=${JAVA_HOME}/bin:${M2_HOME}/bin:${PATH}
-
-
-- name: Checking if Jenkins is already installed
-  stat:
-    path: '/var/lib/jenkins/config.xml'
-  register: jenkins_present
-  tags: 
-    - master
-
-- name: Download jenkins repo
-  get_url:
-    url: "http://pkg.jenkins-ci.org/redhat-stable/jenkins.repo"
-    dest: /etc/yum.repos.d/jenkins.repo
-  when: not jenkins_present.stat.exists
-  tags: 
-    - master
-
-- name: Import jenkins CI key
-  rpm_key:
-    key: http://pkg.jenkins-ci.org/redhat/jenkins-ci.org.key
-    state: present
-  when: not jenkins_present.stat.exists
-  tags: 
-    - master
-
-- name: Install jenkins
-  yum:
-    name: jenkins
-    state: present
-    update_cache: yes
-  when: not jenkins_present.stat.exists
-  tags: 
-    - master
 
 - name: Install docker dependencies
   package:
@@ -132,23 +151,7 @@
     - https://download.docker.com/linux/centos/7/x86_64/stable/Packages/docker-ce-cli-18.09.2-3.el7.x86_64.rpm
     - https://download.docker.com/linux/centos/7/x86_64/stable/Packages/containerd.io-1.2.2-3.el7.x86_64.rpm
     - https://download.docker.com/linux/centos/7/x86_64/stable/Packages/docker-ce-18.09.2-3.el7.x86_64.rpm
-  
 
-- name: Allow port 8080
-  iptables:
-     chain: INPUT
-     protocol: tcp
-     destination_port: "8080"
-     ctstate: NEW,ESTABLISHED
-     jump: ACCEPT
-
-- name: Ensure the Jenkins service is running
-  service:
-    name: jenkins
-    state: started
-    enabled: yes
-  tags: 
-    - master
 
 - name: Ensure the docker service is running
   service:
@@ -156,36 +159,49 @@
     state: started
     enabled: yes
 
-
-- name: Ensure group "devops" exists
-  group:
-    name: devops
-    state: present
-
-- name: Add the user 'jenkins' with a bash shell, appending to devops group
-  user:
-    name: jenkins
-    groups: devops
-    append: yes
-    password: Jenkins@1234
-
-- name: Create a 2048-bit SSH key for user jenkins in ~/.ssh/id_rsa
-  user:
-    name: jenkins
-    generate_ssh_key: yes
-    ssh_key_bits: 2048
-    ssh_key_file: ~/.ssh/id_rsa
-  tags: 
+- name: Checking if Jenkins is already installed
+  stat:
+    path: "/var/lib/jenkins/config.xml"
+  register: jenkins_present
+  tags:
     - master
 
-- name: Adding Jenkins as admin
-  lineinfile:
-      path: /etc/sudoers
-      state: present
-      regexp: '^# %wheel'
-      line: 'jenkins ALL=(ALL) NOPASSWD: ALL'
-      validate: 'visudo -cf %s'
+- name: Download jenkins repo
+  get_url:
+    url: "http://pkg.jenkins-ci.org/redhat-stable/jenkins.repo"
+    dest: /etc/yum.repos.d/jenkins.repo
+  when: not jenkins_present.stat.exists
+  tags:
+    - master
 
+- name: Import jenkins CI key
+  rpm_key:
+    key: http://pkg.jenkins-ci.org/redhat/jenkins-ci.org.key
+    state: present
+  when: not jenkins_present.stat.exists
+  tags:
+    - master
+
+- name: Install jenkins
+  yum:
+    name: jenkins
+    state: present
+    update_cache: yes
+  when: not jenkins_present.stat.exists
+  tags:
+    - master
+
+- name: Ensure the Jenkins service is running
+  service:
+    name: jenkins
+    state: started
+    enabled: yes
+  tags:
+    - master
+
+- name: Wait until the file initialAdminPassword is present before continuing
+  wait_for:
+    path: /var/lib/jenkins/secrets/initialAdminPassword
 
 - name: Capture key
   shell: cat /var/lib/jenkins/secrets/initialAdminPassword
@@ -196,5 +212,11 @@
 - name: Print key
   debug:
     var: adminpass
+  tags:
+    - master
+
+- name: PRINT JENKINS LICENSE KEY
+  debug:
+    msg: Password for is "{{ adminpass.stdout }}"
   tags:
     - master
